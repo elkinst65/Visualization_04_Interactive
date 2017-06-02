@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="x-ua-compatible" content="ie=edge">
+		<style>
+			table, tr, td, div, canvas {
+				display: inline;
+				margin: 0px;
+				padding: 0px;
+			}
+
+			body {
+				background-color: #C8BFE7;
+				font-family: Arial;
+			}
+			
+			#cnvHeat {
+				width: 545px;
+				height: 400px;
+				border: 1px solid black;
+			}
+			
+			#cnvBar {
+				border: 1px solid black;
+			}
+			#cnvPlot {
+				border: 1px solid black;
+			}
+			
+			#divHeat {
+				width: 545px;
+				height: 400px;
+				position:absolute;
+				transform: rotateX(30deg) rotateY(45deg) translate3d(505px, -140px,0);
+			}
+			
+			#divGeoMap {
+				position: absolute;
+				width: 620px;
+				height: 763px;
+				transform: rotateX(60deg) translate3d(200px,280px,0px);
+				background: #000000 url("PSA_Map.png") no-repeat;
+			}
+			
+			.geoDot {
+				font-family :	webdings;
+				font-size: 16pt;
+				position: absolute;
+				display: inline;
+				cursor: pointer;
+			}
+			
+			#divCharts {
+				position: absolute;
+				width: 400px;
+				height: 400px;
+				transform: rotateX(-30deg) rotateY(45deg) translate3d(135px, 92px, 0);
+			}
+			
+			#divTitle {
+				position:absolute;
+				top: 10px;
+				left: 50%;
+			}
+		</style>
+	</head>
+	<body>
+		<!--
+			The entire display is made up of only 4 "DIV" elements.
+			We use CSS to position the DIV elements to form the "inside cube" view.
+			
+			divGeoMap is the bottom panel - it shows the Map of the Police districts/service areas as a background image.  This allows us to 
+				add elements (the dots for the individual crimes) without disturbing the image.
+			divHeat is the right panel - it contains a Canvas element that we use to draw the heat map.  We can add functions to redraw this heatmap
+				for other combinations of variables if we want.
+			divCharts is the left panel - it contains a Canvas element at the top half in which we draw the bar chart of crime types, and the bottom half
+				is simply another DIV for text display.
+			divTitle is in the upper right and just shows the title for the display.
+		-->
+		<div id="divGeoMap"></div>
+		<div id="divHeat"><canvas id="cnvHeat" width="545" height="400"></canvas></div>
+		<div id="divCharts"><canvas id="cnvBar" width="400" height="200"></canvas><div id="divInfo" width="400" height="200"></div></div>
+		<div id="divTitle"><h1>Washington, D.C. 2015 Crime Data</h1></div>
+		
+		<!--
+			We could save this to an external file, but for ease of transportation, we'll keep it here.
+		-->
+		<script>
+			var gnaDayHr = [], gnDayHrMax = 0;		//	This will become a 2D array to store the # of crimes committed for a given weekday and hour
+			var gnaDHType = [];						//	This will become a 3D array to store the # of crimes committed for a given weekday, hour, and type
+			var goaDHCrime = [];					//	This will become a 4D array to store the actual data from the CSV file.  It will be indexed by Weekday, Hour, Type, and instance.
+			var gnaCrimes = [0,0,0,0,0,0,0,0,0,0];	//	This will be the total count of crimes by crime type - independent of day/hour
+			
+			//	Labels for our charts
+			var gsaWeekday = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+			var gsaCrimes = ["Theft","f/Auto","Burglary","Assault","Robbery","Vehicle","Homicide","Sex","Arson"];
+
+			//	Initialize the multi-dimensional arrays
+			//	Loop through the weekdays
+			for (piDay = 0; piDay < 7; piDay++) {
+				//	Make each day entry an array
+				gnaDayHr[piDay] = [];
+				gnaDHType[piDay] = [];
+				goaDHCrime[piDay] = [];
+				
+				//	Loop through the hours
+				for (piHr = 0; piHr < 24; piHr++) {
+					//	Set the Day/Hour crime count to 0
+					gnaDayHr[piDay][piHr] = 0;
+					
+					//	Make each hour another array
+					gnaDHType[piDay][piHr] = [];
+					goaDHCrime[piDay][piHr] = [];
+					
+					//	Loop through the crime types
+					//	There are only 9 types, but we will use index 0 to store the total count
+					for (piType = 0; piType < 10; piType++) {
+					
+						//	Set the Day/Hour/Type crime count to 0
+						gnaDHType[piDay][piHr][piType] = 0;
+						
+						//	Make each type an array
+						goaDHCrime[piDay][piHr][piType] = [];
+					}
+				}
+			}
+			
+			/*	Read the data file and populate our data structures */
+			var goFSO = new ActiveXObject("Scripting.FileSystemObject");
+			var goCSV = goFSO.OpenTextFile("DC_Crime_2015_Lab2.csv");
+			var gsLine, gnLines;
+			
+			//	Skip first line (field names)
+			gsLine = goCSV.readLine();
+			gnLines = 0;
+			
+			//	Loop through the records
+			while (!goCSV.AtEndOfStream) {
+				
+				//	Read a line from the file
+				gsLine = goCSV.readLine();
+				gnLines += 1;
+				
+				//	Split the line into individual values at each comma
+				var paFields = gsLine.split(",");
+				
+				/*	paFields will now be structured like this:
+					00 	: Report Date	date
+					01 	: Shift			string
+					02 	: Offense		string
+					03	: Method		string
+					04	: District		number/string
+					05	: PSA			number/string
+					06	: Ward			number
+					07	: ANC			number
+					08	: Neighborhood	number
+					09	: Census Tract	number
+					10	: Voting Pct	number
+					11	: CCN			number
+					12	: XBlock		number
+					13	: YBlock		number
+					14	: Start date	date
+					15	: End date		date
+					16	: PSA_ID		number
+					17	: DistrictID	number
+					18	: Shift_Code	number
+					19	: Offense_Code	number
+					20	: Method Code	number
+					21	: Crime Type	number
+					22	: Age			number
+					23	: Time to rpt	number
+					24	: Latitude		number
+					25	: Longitude		number
+					26	: Month			number 1-12
+					27	: Weekday		number 1= sunday; 7 = Saturday
+					28	: Hour			number 0 - 23
+				*/
+				
+				//	Create local variables to hold key values so we don't have to use array indexing all the time
+				var pnDay = Number(paFields[27]) - 1;
+				var pnHr = Number(paFields[28]);
+				var pnCrm = Number(paFields[19]);
+				
+				gnaDayHr[pnDay][pnHr] += 1;		//	Increment the crime count for this Day/Hour combo
+				
+				//	Keep track of the maximum number of crimes for a given Day/Hour combo (this will be used for setting the color in the heatmap)
+				if (gnaDayHr[pnDay][pnHr] > gnDayHrMax) { gnDayHrMax = gnaDayHr[pnDay][pnHr]; }
+				
+				gnaDHType[pnDay][pnHr][pnCrm] += 1;	//	Increment the crime count for this Day/Hour/Type combo
+				gnaDHType[pnDay][pnHr][0] += 1;		//	Increment the total count for this Day/Hour
+				gnaCrimes[pnCrm] += 1;				//	Increment the total count for the crime type
+				gnaCrimes[0] += 1;					//	Increment the total count of crimes
+				
+				//	Save the data from the record into an object and push it onto the Day/Hour/Type/Instance array
+				goaDHCrime[pnDay][pnHr][pnCrm].push({start: paFields[14], end: paFields[15], responded: paFields[0], shift: paFields[1], offense: paFields[2], method: paFields[3], ward: paFields[6], anc: paFields[7], neighborhood: paFields[8], tract: paFields[9], voting: Number(paFields[10]), ccn: Number(paFields[11]), psa: Number(paFields[16]), district: Number(paFields[17]), x : (Number(paFields[12]) - 390100) / 17900, y: (Number(paFields[13]) - 125000) / 22400, response: Number(paFields[23]), month: Number(paFields[26]), weekday: pnDay, hour: pnHr});
+			}
+
+			//	Create variables to easily access the various canvases and contexts
+			var heatCanvas = document.getElementById("cnvHeat");
+			var heatMap = heatCanvas.getContext("2d");
+			var barCanvas = document.getElementById("cnvBar");
+			var barChart = barCanvas.getContext("2d");
+			var geoMap = document.getElementById("divGeoMap");
+			
+			var pnHeatBoxWidth = (heatCanvas.width - 15) / 24;		//	Calculate the width of a heatMap box for each hour
+			var pnHeatBoxHeight = (heatCanvas.height - 15) / 7;		//	Calculate the height of a heatMap box for each weekday
+			var pnBarWidth = (barCanvas.width - 30) / 9;			//	Calcualte the width of a bar for each crime type
+			var pnBarMaxHeight = (barCanvas.height - 15);			//	Calculate the maximum height for a bar in the bar-chart area
+			
+			
+			//	Write the labels for the crime types in the bar chart canvas
+			for (piType=0; piType < 9; piType++) {
+				barChart.fillStyle = "black";
+				barChart.textAlign = "center";
+				barChart.fillText(gsaCrimes[piType],15 + (piType * pnBarWidth) + (pnBarWidth / 2), barCanvas.height - 5);
+			}
+			drawBarChart(gnaCrimes);	//	Draw the default chart showing the breakout of ALL 2015 crimes by crime type
+			
+			//	Loop through the weekdays
+			for (piDay=0; piDay < 7; piDay++) {
+				//	Write the name of the weekday rotated 90 degrees
+				heatMap.save();
+				heatMap.fillStyle = "black";
+				heatMap.translate(heatCanvas.width - 5,(piDay * pnHeatBoxHeight) + (pnHeatBoxHeight / 2) + 15);
+				heatMap.rotate(-Math.PI / 2);
+				heatMap.textAlign = "center";
+				heatMap.fillText(gsaWeekday[piDay],0,0);
+				heatMap.restore();
+				
+				//	Loop through the hours in the day
+				for (piHr = 0; piHr < 24; piHr++) {
+				
+					//	Use the count of crimes for the Day/Hour to set the color
+					heatMap.fillStyle = colorScale(gnaDayHr[piDay][piHr], gnDayHrMax);
+					
+					//	Draw a rectangle at the appropriate day (row) and hour (column)
+					heatMap.fillRect((piHr * pnHeatBoxWidth), (piDay * pnHeatBoxHeight) + 15, pnHeatBoxWidth, pnHeatBoxHeight);
+					
+					//	Since we're looping through the hours, write the hour label along the top - and force it to be a 2-digit value
+					heatMap.textAlign = "center"
+					heatMap.fillStyle = "black";
+					heatMap.fillText(("0" + piHr.toString()).slice(-2),(piHr * pnHeatBoxWidth) + (pnHeatBoxWidth/2),10);
+				}
+			}
+			
+			//	Add a click event to the heatmap - this function will fire when the user clicks on the heatmap
+			heatCanvas.addEventListener("click", function(evt) {
+				
+				/*	Since the DIV that hosts the heatmap is rotated, we need to use the offset X/Y position - which gives the mouse location 
+					relative to the object that triggered the event.  This way we can map the relative position consistently and determine
+					the day and hour that corresponds to the mouse location
+				*/
+				var pnDay = Math.floor((evt.offsetY - 15) / pnHeatBoxHeight);
+				var pnHr = Math.floor(evt.offsetX / pnHeatBoxWidth);
+				
+				//	Create the bar chart for this Day/Hour
+				drawBarChart(gnaDHType[pnDay][pnHr]);
+				
+				//	Display points in the map for this Day/Hour
+				drawGeoPoints(goaDHCrime[pnDay][pnHr]);
+			},false);
+
+			//	Add an event to display the count of crimes for this day/hour when the user hovers over a heatmap tile
+			heatCanvas.addEventListener("mousemove", function(evt) {
+				//	Derive the day and hour from the mouse position
+				var pnDay = Math.floor((evt.offsetY - 15) / pnHeatBoxHeight);
+				var pnHr = Math.floor(evt.offsetX / pnHeatBoxWidth);
+				
+				//	Ignore when the mouse is in the label regions or the border
+				if ((pnDay < 7) && (pnDay >= 0) && (pnHr >= 0) && (pnHr < 24)) {
+					//	Display a "tool-tip" that shows the day, hour, and # crimes
+					heatCanvas.title = gsaWeekday[pnDay] + " @ " + pnHr + "-" + (pnHr + 1) + ": " + gnaDayHr[pnDay][pnHr] + " crimes.";
+				}
+			},false);
+			
+			//	Draws a percentage line in the bar chart area
+			function drawBarLevel(xdPct) {
+				var lineHt = barCanvas.height - 15 - (xdPct * pnBarMaxHeight);
+				barChart.fillStyle = "black";
+				barChart.textAlign = "right";
+				barChart.fillText(Math.floor(xdPct * 100.0) + "%",25,lineHt);
+				barChart.beginPath();
+				barChart.moveTo(30,lineHt);
+				barChart.lineTo(barCanvas.width,lineHt);
+				barChart.stroke();
+			}
+
+			//	Draws a bar chart for the given Day/Hour array
+			function drawBarChart(xaData) {
+				//	Delete what was there
+				barChart.clearRect(0,0,barCanvas.width, barCanvas.height);
+				
+				//	Draw lines every 10%
+				for (pdLvl=10; pdLvl < 100; pdLvl+=10) {
+					drawBarLevel(pdLvl/100);
+				}
+				
+				//	Loop through the crime types
+				for (piType=1; piType < 10; piType++) {
+					//	Set the color for the crime type
+					barChart.fillStyle = colorScale(piType,9);
+					
+					//	Calculate the percentage that each crime type's count represents
+					var barHt = (xaData[piType] / xaData[0]) * pnBarMaxHeight;
+					
+					//	Draw the bar
+					barChart.fillRect(30 + ((piType - 1) * pnBarWidth) + (0.1 * pnBarWidth), barCanvas.height - 15, 0.8 * pnBarWidth, 0 - barHt);
+
+					//	Write the crime type label
+					barChart.fillStyle = "black";
+					barChart.textAlign = "center";
+					barChart.fillText(gsaCrimes[piType-1],30 + ((piType - 1) * pnBarWidth) + (pnBarWidth / 2), barCanvas.height - 5);
+
+					//	Write the actual count of crimes for this type
+					barChart.fillText(xaData[piType],30 + ((piType - 1) * pnBarWidth) + (pnBarWidth / 2), barCanvas.height - 20);
+				}
+			}
+
+			//	Draw dots on the map for each crime in the given array
+			function drawGeoPoints(xaData) {
+				//	Clear the previous set of points
+				geoMap.innerHTML = "";
+				
+				//	Loop through the crime types
+				for (piType=1; piType < 10; piType++) {
+				
+					//	Do we have anything to draw?
+					if(xaData[piType].length > 0) {
+					
+						//	Loop through each crime record for this day/hour/type
+						for (piPt=0; piPt < xaData[piType].length; piPt++) {
+							//	Create a SPAN element to hold our "dot"
+							var spnDot = document.createElement("span");
+							spnDot.className = "geoDot";		//	The styles for this class are set in the STYLE section above
+							spnDot.style.top = ((1.0 - xaData[piType][piPt].y) * 100.0) + "%";	//	Set the north/south location based on the percentage we estimated earlier
+							spnDot.style.left = (xaData[piType][piPt].x * 100.0) + "%";			//	Set the east/west location based on the percentage we estimated earlier
+							spnDot.style.color = colorScale(piType,9);		//	Set the color based on crime type
+							spnDot.title = "CCN: " + xaData[piType][piPt].ccn;	//	Set the tool-tip to be the criminal complaint number
+							spnDot.innerText = "=";		//	This is the "dot" : the font family is set to "Webdings", so an "=" is a dot in that font family.
+
+							//	Set an event handler when the user clicks on a dot
+							spnDot.setAttribute("onclick","showCrimeData(" + xaData[piType][piPt].weekday + "," + xaData[piType][piPt].hour + "," + piType + "," + piPt + ")");
+							
+							//	Add this SPAN to the Map DIV
+							geoMap.appendChild(spnDot);
+						}
+					}
+				}
+			}
+			
+			//	Display information about the specific crime
+			function showCrimeData(xnDay, xnHr, xnType, xnID) {
+				//	Set an object to the specific crime (day/hour/type/instance)
+				var poCrime = goaDHCrime[xnDay][xnHr][xnType][xnID];
+
+				//	Replace the detail pane with information from this crime record
+				document.getElementById("divInfo").innerHTML = "<h3>CCN: " + poCrime.ccn + "</h3>" +
+					"<li>Possible Occurrence: " + poCrime.start + " to " + poCrime.end + "</li>" +
+					"<li>Police responded: " + poCrime.responded + "; age of crime (sec) " + poCrime.response + "</li>" +
+					"<li>District: " + poCrime.district + "; PSA: " + poCrime.psa + "; Shift: " + poCrime.shift + "</li>" +
+					"<li>Offense: " + poCrime.offense + "; Method: " + poCrime.method + "</li>" +
+					"<li>Ward: " + poCrime.ward + "; ANC: " + poCrime.anc + "; Neighborhood: " + poCrime.neighborhood + "; Tract: " + poCrime.tract + "</li>"
+				;
+			}
+
+			//	Set an HTML color value based on a percentage
+			function colorScale(xnValue, xnMax) {
+				var pnPct = (xnValue / xnMax);
+				var pdHeat = pnPct * 1024;
+				
+				if (pdHeat < 256) {
+					return "#00" + dec2hex(pdHeat) + "FF";			// 00 00 ff blue => 00 ff ff cyan
+				} else if (pdHeat < 512) {
+					return "#00FF" + dec2hex(511 - pdHeat);			// 00 ff ff cyan => 00 ff 00 green
+				} else if (pdHeat < 768) {
+					return "#" + dec2hex(pdHeat - 512) + "FF00";	// 00 ff 00 green => ff ff 00 yellow
+				} else {
+					return "#FF" + dec2hex(1024 - pdHeat) + "00";	// ff ff 00 yellow => ff 00 00 red
+				}
+			}
+			
+			//	Convert a decimal number to hexadecimal (for use with the color data)
+			function dec2hex(xnDec) {
+				var pnDec = Math.floor(xnDec);
+				var psHex = ("0" + pnDec.toString(16)).slice(-2);
+				return psHex;
+			}
+		</script>
+	</body>
+</html>

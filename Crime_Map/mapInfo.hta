@@ -90,9 +90,12 @@
 			var gnaDHType = [];						//	This will become a 3D array to store the # of crimes committed for a given weekday, hour, and type
 			var goaDHCrime = [];					//	This will become a 4D array to store the actual data from the CSV file.  It will be indexed by Weekday, Hour, Type, and instance.
 			var gnaCrimes = [0,0,0,0,0,0,0,0,0,0];	//	This will be the total count of crimes by crime type - independent of day/hour
+			var gnaMonHr = [];
+			var gnaMonDy = [];
 			
 			//	Labels for our charts
 			var gsaWeekday = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+			var gsaMonths = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 			var gsaCrimes = ["Theft","f/Auto","Burglary","Assault","Robbery","Vehicle","Homicide","Sex","Arson"];
 
 			//	Initialize the multi-dimensional arrays
@@ -231,7 +234,7 @@
 				for (piHr = 0; piHr < 24; piHr++) {
 				
 					//	Use the count of crimes for the Day/Hour to set the color
-					heatMap.fillStyle = colorScale(gnaDayHr[piDay][piHr], gnDayHrMax);
+					heatMap.fillStyle = colorScale8(gnaDayHr[piDay][piHr], gnDayHrMax);
 					
 					//	Draw a rectangle at the appropriate day (row) and hour (column)
 					heatMap.fillRect((piHr * pnHeatBoxWidth), (piDay * pnHeatBoxHeight) + 15, pnHeatBoxWidth, pnHeatBoxHeight);
@@ -298,7 +301,7 @@
 				//	Loop through the crime types
 				for (piType=1; piType < 10; piType++) {
 					//	Set the color for the crime type
-					barChart.fillStyle = colorScale(piType,9);
+					barChart.fillStyle = colorScale8(piType,10);
 					
 					//	Calculate the percentage that each crime type's count represents
 					var barHt = (xaData[piType] / xaData[0]) * pnBarMaxHeight;
@@ -334,7 +337,7 @@
 							spnDot.className = "geoDot";		//	The styles for this class are set in the STYLE section above
 							spnDot.style.top = ((1.0 - xaData[piType][piPt].y) * 100.0) + "%";	//	Set the north/south location based on the percentage we estimated earlier
 							spnDot.style.left = (xaData[piType][piPt].x * 100.0) + "%";			//	Set the east/west location based on the percentage we estimated earlier
-							spnDot.style.color = colorScale(piType,9);		//	Set the color based on crime type
+							spnDot.style.color = colorScale8(piType,10);		//	Set the color based on crime type
 							spnDot.title = "CCN: " + xaData[piType][piPt].ccn;	//	Set the tool-tip to be the criminal complaint number
 							spnDot.innerText = "=";		//	This is the "dot" : the font family is set to "Webdings", so an "=" is a dot in that font family.
 
@@ -364,7 +367,7 @@
 			}
 
 			//	Set an HTML color value based on a percentage
-			function colorScale(xnValue, xnMax) {
+			function colorScale5(xnValue, xnMax) {
 				var pnPct = (xnValue / xnMax);
 				var pdHeat = pnPct * 1024;
 				
@@ -376,6 +379,34 @@
 					return "#" + dec2hex(pdHeat - 512) + "FF00";	// 00 ff 00 green => ff ff 00 yellow
 				} else {
 					return "#FF" + dec2hex(1024 - pdHeat) + "00";	// ff ff 00 yellow => ff 00 00 red
+				}
+			}
+			
+			function colorScale8(xdValue, xdMax) {
+				var pdPct = (xdValue / xdMax);
+				pnColorMax = 1791;
+				pdHeat = pdPct * pnColorMax;
+				if (pdHeat < 256) {
+					//  00 00 00 black ... 00 00 FF blue
+					return "#0000" + dec2hex(pdHeat);
+				} else if (pdHeat < 512) {
+					//	00 00 FF blue ... 00 FF FF cyan		256=0; 511=255
+					return "#00" + dec2hex(pdHeat - 256) + "FF";
+				} else if (pdHeat < 768) {
+					//	00 FF FF cyan ... 00 FF 00 green	512=255; 767=0
+					return "#00FF" + dec2hex(767 - pdHeat);
+				} else if (pdHeat < 1024) {
+					//	00 FF 00 green ... FF FF 00 yellow	768=0; 1023=255
+					return "#" + dec2hex(pdHeat - 768) + "FF00";
+				} else if (pdHeat < 1280) {
+					//	FF FF 00 yellow ... FF 00 00 red	1024=255; 1279=0
+					return "#FF" + dec2hex(1279 - pdHeat) + "00";
+				} else if (pdHeat < 1536) {
+					//	FF 00 00 red ... FF 00 FF magenta	1280=0; 1535=255
+					return "#FF00" + dec2hex(pdHeat - 1280);
+				} else {
+					//	FF 00 FF magenta ... FF FF FF  white	1536=0: 1791=255
+					return "#FF" + dec2hex(pdHeat - 1536) + "FF";
 				}
 			}
 			
